@@ -109,6 +109,30 @@ jobs:
             "$delimiter" >> $env:GITHUB_OUTPUT
           }
 
+      - name: Acknowledge review command
+        if: github.event_name == 'issue_comment'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $existingReaction = gh api `
+            -H 'Accept: application/vnd.github+json' `
+            "/repos/$env:GITHUB_REPOSITORY/issues/comments/$env:COMMENT_ID/reactions" `
+            --jq '.[] | select(.content == "eyes" and .user.login == "github-actions[bot]") | .id'
+          if ($LASTEXITCODE -ne 0) { throw "failed to check existing /review acknowledgement reaction" }
+
+          if ([string]::IsNullOrWhiteSpace(($existingReaction | Out-String).Trim())) {
+            $null = gh api `
+              -X POST `
+              -H 'Accept: application/vnd.github+json' `
+              "/repos/$env:GITHUB_REPOSITORY/issues/comments/$env:COMMENT_ID/reactions" `
+              -f content=eyes
+            if ($LASTEXITCODE -ne 0) { throw "failed to add /review acknowledgement reaction" }
+          }
+
       - name: Checkout review target
         uses: actions/checkout@v4
         with:
