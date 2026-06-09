@@ -168,6 +168,7 @@ jobs:
 
       - name: Run AI PR review action
         if: steps.trusted-action.outputs.supports_token_inputs == 'true'
+        timeout-minutes: 45
         uses: ./.ai-pr-review-trusted/.github/actions/ai-pr-review
         with:
           trigger: ${{ steps.params.outputs.trigger }}

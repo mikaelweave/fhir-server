@@ -79,7 +79,10 @@ runs:
           Replace('{{reviewLevel}}', $env:REVIEW_LEVEL).
           Replace('{{outputMode}}', $env:REVIEW_OUTPUT_MODE).
           Replace('{{requesterFocus}}', $requesterFocus)
+        Write-Host "::group::Run Copilot review agent"
+        Write-Host "Invoking $env:REVIEW_AGENT_NAME for PR #$env:REVIEW_PR_NUMBER with level '$env:REVIEW_LEVEL' and output mode '$env:REVIEW_OUTPUT_MODE'."
         $report = & copilot -p $prompt --agent $env:REVIEW_AGENT_NAME
+        Write-Host "::endgroup::"
         if ($LASTEXITCODE -ne 0) { throw "copilot review call failed with exit code $LASTEXITCODE" }
         $reportText = ($report | Out-String).Trim()
         if ([string]::IsNullOrWhiteSpace($reportText)) { throw 'copilot review call returned empty output' }
@@ -107,5 +110,8 @@ runs:
           Replace('{{userContext}}', $env:REVIEW_USER_CONTEXT)
         $report = Get-Content .ai-pr-review/report.md -Raw
         $publishPrompt = "$body`n`nSaved report:`n`n$report"
+        Write-Host "::group::Run Copilot publish agent"
+        Write-Host "Publishing review output for PR #$env:REVIEW_PR_NUMBER."
         $null = & copilot -p $publishPrompt --agent $env:REVIEW_AGENT_NAME
+        Write-Host "::endgroup::"
         if ($LASTEXITCODE -ne 0) { throw "copilot publish call failed with exit code $LASTEXITCODE" }
