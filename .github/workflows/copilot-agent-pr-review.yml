@@ -193,9 +193,9 @@ jobs:
           Copilot cloud agent review started.
 
           - Task: $env:TASK_URL
-          - Task ID: `$env:TASK_ID`
-          - Initial state: `$env:TASK_STATE`
-          - Model: `$env:MODEL`
+          - Task ID: ``$env:TASK_ID``
+          - Initial state: ``$env:TASK_STATE``
+          - Model: ``$env:MODEL``
 
           This is the experimental `/agent-review` path. Follow the task link for progress and final output.
           "@
