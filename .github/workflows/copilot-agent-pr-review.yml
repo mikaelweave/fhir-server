@@ -1,0 +1,197 @@
+name: Copilot Agent PR Review
+
+# Experimental path for delegating PR review to Copilot cloud agent via the
+# Agent Tasks API. This is intentionally separate from ai-pr-review.yml.
+
+on:
+  issue_comment:
+    types: [created]
+
+  workflow_dispatch:
+    inputs:
+      pr-number:
+        description: Pull request number to review.
+        required: true
+      model:
+        description: Copilot cloud agent model.
+        required: false
+        default: claude-sonnet-4.6
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  start-agent-review:
+    name: Start Copilot agent review
+    runs-on: ${{ fromJSON(vars.PR_REVIEW_RUNNER_LABELS_JSON || '["ubuntu-latest"]') }}
+
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'issue_comment' &&
+        github.event.issue.pull_request != '' &&
+        startsWith(github.event.comment.body, '/agent-review') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+      )
+
+    steps:
+      - name: Resolve pull request
+        id: pr
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          EVENT_NAME: ${{ github.event_name }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          DISPATCH_PR_NUMBER: ${{ inputs.pr-number }}
+          DISPATCH_MODEL: ${{ inputs.model }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          if ($env:EVENT_NAME -eq 'workflow_dispatch') {
+            $prNumber = $env:DISPATCH_PR_NUMBER
+            $userContext = ''
+            $model = if ([string]::IsNullOrWhiteSpace($env:DISPATCH_MODEL)) { 'claude-sonnet-4.6' } else { $env:DISPATCH_MODEL }
+          } else {
+            $prNumber = $env:ISSUE_NUMBER
+            $userContext = ($env:COMMENT_BODY -replace '^/agent-review', '').Trim()
+            $model = 'claude-sonnet-4.6'
+          }
+
+          $pr = gh pr view $prNumber --repo $env:GITHUB_REPOSITORY --json number,title,url,baseRefName,baseRefOid,headRefName,headRefOid,changedFiles,additions,deletions | ConvertFrom-Json
+
+          "number=$($pr.number)" >> $env:GITHUB_OUTPUT
+          "title=$($pr.title)" >> $env:GITHUB_OUTPUT
+          "url=$($pr.url)" >> $env:GITHUB_OUTPUT
+          "base_ref=$($pr.baseRefName)" >> $env:GITHUB_OUTPUT
+          "head_ref=$($pr.headRefName)" >> $env:GITHUB_OUTPUT
+          "head_sha=$($pr.headRefOid)" >> $env:GITHUB_OUTPUT
+          "changed_files=$($pr.changedFiles)" >> $env:GITHUB_OUTPUT
+          "additions=$($pr.additions)" >> $env:GITHUB_OUTPUT
+          "deletions=$($pr.deletions)" >> $env:GITHUB_OUTPUT
+          "model=$model" >> $env:GITHUB_OUTPUT
+
+          $delimiter = "context_$([guid]::NewGuid().ToString('N'))"
+          "user_context<<$delimiter" >> $env:GITHUB_OUTPUT
+          $userContext >> $env:GITHUB_OUTPUT
+          "$delimiter" >> $env:GITHUB_OUTPUT
+
+      - name: Acknowledge agent review command
+        if: github.event_name == 'issue_comment'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $existingReaction = gh api `
+            -H 'Accept: application/vnd.github+json' `
+            "/repos/$env:GITHUB_REPOSITORY/issues/comments/$env:COMMENT_ID/reactions" `
+            --jq '.[] | select(.content == "eyes" and .user.login == "github-actions[bot]") | .id'
+          if ($LASTEXITCODE -ne 0) { throw "failed to check existing /agent-review acknowledgement reaction" }
+
+          if ([string]::IsNullOrWhiteSpace(($existingReaction | Out-String).Trim())) {
+            $null = gh api `
+              -X POST `
+              -H 'Accept: application/vnd.github+json' `
+              "/repos/$env:GITHUB_REPOSITORY/issues/comments/$env:COMMENT_ID/reactions" `
+              -f content=eyes
+            if ($LASTEXITCODE -ne 0) { throw "failed to add /agent-review acknowledgement reaction" }
+          }
+
+      - name: Start Copilot cloud agent task
+        id: task
+        shell: pwsh
+        env:
+          AGENT_TASKS_TOKEN: ${{ secrets.COPILOT_AGENT_TASKS_TOKEN || secrets.COPILOT_GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          PR_TITLE: ${{ steps.pr.outputs.title }}
+          PR_URL: ${{ steps.pr.outputs.url }}
+          BASE_REF: ${{ steps.pr.outputs.base_ref }}
+          HEAD_REF: ${{ steps.pr.outputs.head_ref }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+          CHANGED_FILES: ${{ steps.pr.outputs.changed_files }}
+          ADDITIONS: ${{ steps.pr.outputs.additions }}
+          DELETIONS: ${{ steps.pr.outputs.deletions }}
+          MODEL: ${{ steps.pr.outputs.model }}
+          USER_CONTEXT: ${{ steps.pr.outputs.user_context }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:AGENT_TASKS_TOKEN)) {
+            throw 'COPILOT_AGENT_TASKS_TOKEN or COPILOT_GITHUB_TOKEN is required to start a Copilot cloud agent task.'
+          }
+
+          $prompt = @"
+          Review pull request #$env:PR_NUMBER in $env:GITHUB_REPOSITORY.
+
+          PR title: $env:PR_TITLE
+          PR URL: $env:PR_URL
+          Base ref: $env:BASE_REF
+          Head ref: $env:HEAD_REF
+          Head SHA: $env:HEAD_SHA
+          Size: $env:CHANGED_FILES changed files, +$env:ADDITIONS/-$env:DELETIONS
+
+          Use the repository's PR review instructions at .github/instructions/pr-review.instructions.md.
+          If the repository has a custom code review agent named code-review-agent, use that agent's review expectations and output format.
+
+          Goal: produce a high-signal code review for this PR. Focus on correctness, tests, silent failures, type/API design, and maintainability. Avoid style-only feedback unless it materially affects maintainability.
+
+          Do not modify code. Do not create a pull request. If your tools allow commenting on the existing pull request, post a concise top-level review comment and inline comments only for findings that can be safely anchored to changed diff lines. If commenting is not available, complete the task with the review report in the task session.
+
+          Additional requester context:
+          $env:USER_CONTEXT
+          "@
+
+          $body = @{
+            prompt = $prompt
+            base_ref = $env:BASE_REF
+            head_ref = $env:HEAD_REF
+            model = $env:MODEL
+            create_pull_request = $false
+          } | ConvertTo-Json -Depth 5
+
+          $response = Invoke-RestMethod `
+            -Method Post `
+            -Uri "https://api.github.com/agents/repos/$env:GITHUB_REPOSITORY/tasks" `
+            -Headers @{
+              Accept = 'application/vnd.github+json'
+              Authorization = "Bearer $env:AGENT_TASKS_TOKEN"
+              'X-GitHub-Api-Version' = '2026-03-10'
+            } `
+            -ContentType 'application/json' `
+            -Body $body
+
+          "id=$($response.id)" >> $env:GITHUB_OUTPUT
+          "html_url=$($response.html_url)" >> $env:GITHUB_OUTPUT
+          "state=$($response.state)" >> $env:GITHUB_OUTPUT
+
+      - name: Comment with agent task link
+        if: always() && steps.task.outputs.id != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          TASK_ID: ${{ steps.task.outputs.id }}
+          TASK_URL: ${{ steps.task.outputs.html_url }}
+          TASK_STATE: ${{ steps.task.outputs.state }}
+          MODEL: ${{ steps.pr.outputs.model }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $body = @"
+          Copilot cloud agent review started.
+
+          - Task: $env:TASK_URL
+          - Task ID: `$env:TASK_ID`
+          - Initial state: `$env:TASK_STATE`
+          - Model: `$env:MODEL`
+
+          This is the experimental `/agent-review` path. Follow the task link for progress and final output.
+          "@
+
+          gh pr comment $env:PR_NUMBER --repo $env:GITHUB_REPOSITORY --body $body
