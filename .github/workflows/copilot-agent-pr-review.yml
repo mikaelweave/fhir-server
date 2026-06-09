@@ -175,29 +175,3 @@ jobs:
           "id=$($response.id)" >> $env:GITHUB_OUTPUT
           "html_url=$($response.html_url)" >> $env:GITHUB_OUTPUT
           "state=$($response.state)" >> $env:GITHUB_OUTPUT
-
-      - name: Comment with agent task link
-        if: always() && steps.task.outputs.id != ''
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ steps.pr.outputs.number }}
-          TASK_ID: ${{ steps.task.outputs.id }}
-          TASK_URL: ${{ steps.task.outputs.html_url }}
-          TASK_STATE: ${{ steps.task.outputs.state }}
-          MODEL: ${{ steps.pr.outputs.model }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $body = @"
-          Copilot cloud agent review started.
-
-          - Task: $env:TASK_URL
-          - Task ID: ``$env:TASK_ID``
-          - Initial state: ``$env:TASK_STATE``
-          - Model: ``$env:MODEL``
-
-          This is the experimental `/agent-review` path. Follow the task link for progress and final output.
-          "@
-
-          gh pr comment $env:PR_NUMBER --repo $env:GITHUB_REPOSITORY --body $body
