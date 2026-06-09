@@ -20,7 +20,7 @@ on:
 permissions:
   contents: read
   issues: write
-  pull-requests: read
+  pull-requests: write
 
 jobs:
   start-agent-review:
@@ -92,7 +92,10 @@ jobs:
             -H 'Accept: application/vnd.github+json' `
             "/repos/$env:GITHUB_REPOSITORY/issues/comments/$env:COMMENT_ID/reactions" `
             --jq '.[] | select(.content == "eyes" and .user.login == "github-actions[bot]") | .id'
-          if ($LASTEXITCODE -ne 0) { throw "failed to check existing /agent-review acknowledgement reaction" }
+          if ($LASTEXITCODE -ne 0) {
+            Write-Warning 'Unable to check existing /agent-review acknowledgement reaction; continuing without acknowledgement.'
+            exit 0
+          }
 
           if ([string]::IsNullOrWhiteSpace(($existingReaction | Out-String).Trim())) {
             $null = gh api `
@@ -100,7 +103,10 @@ jobs:
               -H 'Accept: application/vnd.github+json' `
               "/repos/$env:GITHUB_REPOSITORY/issues/comments/$env:COMMENT_ID/reactions" `
               -f content=eyes
-            if ($LASTEXITCODE -ne 0) { throw "failed to add /agent-review acknowledgement reaction" }
+            if ($LASTEXITCODE -ne 0) {
+              Write-Warning 'Unable to add /agent-review acknowledgement reaction; continuing without acknowledgement.'
+              exit 0
+            }
           }
 
       - name: Start Copilot cloud agent task

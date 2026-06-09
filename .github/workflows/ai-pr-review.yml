@@ -122,7 +122,10 @@ jobs:
             -H 'Accept: application/vnd.github+json' `
             "/repos/$env:GITHUB_REPOSITORY/issues/comments/$env:COMMENT_ID/reactions" `
             --jq '.[] | select(.content == "eyes" and .user.login == "github-actions[bot]") | .id'
-          if ($LASTEXITCODE -ne 0) { throw "failed to check existing /review acknowledgement reaction" }
+          if ($LASTEXITCODE -ne 0) {
+            Write-Warning 'Unable to check existing /review acknowledgement reaction; continuing without acknowledgement.'
+            exit 0
+          }
 
           if ([string]::IsNullOrWhiteSpace(($existingReaction | Out-String).Trim())) {
             $null = gh api `
@@ -130,7 +133,10 @@ jobs:
               -H 'Accept: application/vnd.github+json' `
               "/repos/$env:GITHUB_REPOSITORY/issues/comments/$env:COMMENT_ID/reactions" `
               -f content=eyes
-            if ($LASTEXITCODE -ne 0) { throw "failed to add /review acknowledgement reaction" }
+            if ($LASTEXITCODE -ne 0) {
+              Write-Warning 'Unable to add /review acknowledgement reaction; continuing without acknowledgement.'
+              exit 0
+            }
           }
 
       - name: Checkout review target
