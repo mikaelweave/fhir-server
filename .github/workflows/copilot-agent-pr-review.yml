@@ -1,7 +1,7 @@
-name: Copilot Agent PR Review
+name: GitHub Agent PR Review
 
-# Experimental path for delegating PR review to Copilot cloud agent via the
-# Agent Tasks API. This is intentionally separate from ai-pr-review.yml.
+# Primary GitHub PR review path. Trusted /review comments delegate review to
+# Copilot cloud agent through the Agent Tasks API.
 
 on:
   issue_comment:
@@ -32,7 +32,7 @@ jobs:
       (
         github.event_name == 'issue_comment' &&
         github.event.issue.pull_request != '' &&
-        startsWith(github.event.comment.body, '/agent-review') &&
+        startsWith(github.event.comment.body, '/review') &&
         contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
       )
 
@@ -57,7 +57,7 @@ jobs:
             $model = if ([string]::IsNullOrWhiteSpace($env:DISPATCH_MODEL)) { 'claude-sonnet-4.6' } else { $env:DISPATCH_MODEL }
           } else {
             $prNumber = $env:ISSUE_NUMBER
-            $userContext = ($env:COMMENT_BODY -replace '^/agent-review', '').Trim()
+            $userContext = ($env:COMMENT_BODY -replace '^/review', '').Trim()
             $model = 'claude-sonnet-4.6'
           }
 
@@ -79,7 +79,7 @@ jobs:
           $userContext >> $env:GITHUB_OUTPUT
           "$delimiter" >> $env:GITHUB_OUTPUT
 
-      - name: Acknowledge agent review command
+      - name: Acknowledge review command
         if: github.event_name == 'issue_comment'
         shell: pwsh
         env:
@@ -93,7 +93,7 @@ jobs:
             "/repos/$env:GITHUB_REPOSITORY/issues/comments/$env:COMMENT_ID/reactions" `
             --jq '.[] | select(.content == "eyes" and .user.login == "github-actions[bot]") | .id'
           if ($LASTEXITCODE -ne 0) {
-            Write-Warning 'Unable to check existing /agent-review acknowledgement reaction; continuing without acknowledgement.'
+            Write-Warning 'Unable to check existing /review acknowledgement reaction; continuing without acknowledgement.'
             exit 0
           }
 
@@ -104,7 +104,7 @@ jobs:
               "/repos/$env:GITHUB_REPOSITORY/issues/comments/$env:COMMENT_ID/reactions" `
               -f content=eyes
             if ($LASTEXITCODE -ne 0) {
-              Write-Warning 'Unable to add /agent-review acknowledgement reaction; continuing without acknowledgement.'
+              Write-Warning 'Unable to add /review acknowledgement reaction; continuing without acknowledgement.'
               exit 0
             }
           }

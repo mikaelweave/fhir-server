@@ -1,8 +1,8 @@
 name: AI PR Review
 
-# Parked secondary automation path.
-# Keep this workflow runnable for later automation work,
-# but do not treat it as the primary human-facing review path.
+# Legacy Copilot CLI automation path.
+# Keep this workflow runnable for artifact-only PR smoke tests and explicit
+# /cli-review fallback, but do not bind it to the primary /review command.
 # See docs/automation-status.md for current status and fix backlog.
 
 on:
@@ -11,23 +11,6 @@ on:
 
   issue_comment:
     types: [created]
-
-  workflow_dispatch:
-    inputs:
-      pr_number:
-        description: PR number to review
-        required: true
-        type: string
-      review_level:
-        description: Review level to use
-        required: false
-        default: medium
-        type: string
-      output_mode:
-        description: Output mode to use
-        required: false
-        default: pr-comments
-        type: string
 
 permissions:
   contents: read
@@ -42,12 +25,11 @@ jobs:
     runs-on: ${{ fromJSON(vars.PR_REVIEW_RUNNER_LABELS_JSON || '["ubuntu-latest"]') }}
 
     if: |
-      github.event_name == 'workflow_dispatch' ||
       github.event_name == 'pull_request' ||
       (
         github.event_name == 'issue_comment' &&
         github.event.issue.pull_request != '' &&
-        startsWith(github.event.comment.body, '/review') &&
+        startsWith(github.event.comment.body, '/cli-review') &&
         contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
       )
 
@@ -58,9 +40,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COMMENT_BODY: ${{ github.event.comment.body }}
-          DISPATCH_OUTPUT_MODE: ${{ inputs.output_mode }}
-          DISPATCH_PR_NUMBER: ${{ inputs.pr_number }}
-          DISPATCH_REVIEW_LEVEL: ${{ inputs.review_level }}
           EVENT_NAME: ${{ github.event_name }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
@@ -81,19 +60,8 @@ jobs:
             "level=low" >> $env:GITHUB_OUTPUT
             "output_mode=report-only" >> $env:GITHUB_OUTPUT
             "user_context=" >> $env:GITHUB_OUTPUT
-          } elseif ($env:EVENT_NAME -eq 'workflow_dispatch') {
-            $prJson = gh pr view $env:DISPATCH_PR_NUMBER --repo $env:GITHUB_REPOSITORY --json baseRefName,baseRefOid,headRefName,headRefOid | ConvertFrom-Json
-            "trigger=on-request" >> $env:GITHUB_OUTPUT
-            "pr_number=$($env:DISPATCH_PR_NUMBER)" >> $env:GITHUB_OUTPUT
-            "base_ref=$($prJson.baseRefName)" >> $env:GITHUB_OUTPUT
-            "head_ref=$($prJson.headRefName)" >> $env:GITHUB_OUTPUT
-            "head_sha=$($prJson.headRefOid)" >> $env:GITHUB_OUTPUT
-            "trusted_ref=$($env:GITHUB_SHA)" >> $env:GITHUB_OUTPUT
-            "level=$($env:DISPATCH_REVIEW_LEVEL)" >> $env:GITHUB_OUTPUT
-            "output_mode=$($env:DISPATCH_OUTPUT_MODE)" >> $env:GITHUB_OUTPUT
-            "user_context=" >> $env:GITHUB_OUTPUT
           } else {
-            $userContext = ($env:COMMENT_BODY -replace '^/review', '').Trim()
+            $userContext = ($env:COMMENT_BODY -replace '^/cli-review', '').Trim()
             $prJson = gh pr view $env:ISSUE_NUMBER --repo $env:GITHUB_REPOSITORY --json baseRefName,baseRefOid,headRefName,headRefOid | ConvertFrom-Json
             "trigger=on-request" >> $env:GITHUB_OUTPUT
             "pr_number=$($env:ISSUE_NUMBER)" >> $env:GITHUB_OUTPUT
@@ -109,7 +77,7 @@ jobs:
             "$delimiter" >> $env:GITHUB_OUTPUT
           }
 
-      - name: Acknowledge review command
+      - name: Acknowledge CLI review command
         if: github.event_name == 'issue_comment'
         shell: pwsh
         env:
@@ -123,7 +91,7 @@ jobs:
             "/repos/$env:GITHUB_REPOSITORY/issues/comments/$env:COMMENT_ID/reactions" `
             --jq '.[] | select(.content == "eyes" and .user.login == "github-actions[bot]") | .id'
           if ($LASTEXITCODE -ne 0) {
-            Write-Warning 'Unable to check existing /review acknowledgement reaction; continuing without acknowledgement.'
+            Write-Warning 'Unable to check existing /cli-review acknowledgement reaction; continuing without acknowledgement.'
             exit 0
           }
 
@@ -134,7 +102,7 @@ jobs:
               "/repos/$env:GITHUB_REPOSITORY/issues/comments/$env:COMMENT_ID/reactions" `
               -f content=eyes
             if ($LASTEXITCODE -ne 0) {
-              Write-Warning 'Unable to add /review acknowledgement reaction; continuing without acknowledgement.'
+              Write-Warning 'Unable to add /cli-review acknowledgement reaction; continuing without acknowledgement.'
               exit 0
             }
           }
