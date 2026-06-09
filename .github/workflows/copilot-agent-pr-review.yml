@@ -113,7 +113,7 @@ jobs:
         id: task
         shell: pwsh
         env:
-          AGENT_TASKS_TOKEN: ${{ secrets.COPILOT_AGENT_TASKS_TOKEN || secrets.COPILOT_GITHUB_TOKEN }}
+          AGENT_TASKS_TOKEN: ${{ secrets.COPILOT_AGENT_TASKS_TOKEN }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           PR_TITLE: ${{ steps.pr.outputs.title }}
           PR_URL: ${{ steps.pr.outputs.url }}
@@ -129,7 +129,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           if ([string]::IsNullOrWhiteSpace($env:AGENT_TASKS_TOKEN)) {
-            throw 'COPILOT_AGENT_TASKS_TOKEN or COPILOT_GITHUB_TOKEN is required to start a Copilot cloud agent task.'
+            throw 'COPILOT_AGENT_TASKS_TOKEN is required to start a Copilot cloud agent task.'
           }
 
           $prompt = @"
