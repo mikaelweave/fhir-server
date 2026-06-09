@@ -45,7 +45,7 @@ runs:
   steps:
     - name: Install Copilot CLI
       shell: bash
-      run: npm install -g @github-copilot/cli
+      run: npm install -g @github/copilot
 
     - name: Run review agent call
       shell: pwsh
